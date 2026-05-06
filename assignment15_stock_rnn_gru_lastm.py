@@ -316,6 +316,7 @@ def evaluate_loss(model, loader, criterion, device):
 
 
 #Master Training Function
+def train_model_for_stock(ticker, model_name):
     train_loader = loaders[ticker]["train_loader"]
     test_loader  = loaders[ticker]["test_loader"]
 
@@ -347,3 +348,156 @@ def evaluate_loss(model, loader, criterion, device):
         )
 
     return model, history
+
+#train each model for each stock
+results = {}
+
+for ticker in STOCKS:
+    results[ticker] = {}
+
+    for model_name in ["RNN", "LSTM", "GRU"]:
+        model, history = train_model_for_stock(ticker, model_name)
+
+        results[ticker][model_name] = {
+            "model": model,
+            "history": history
+        }
+# Prediction Function 
+def get_predictions(model, loader, device):
+    model.eval()
+
+    preds = []
+    actuals = []
+
+    with torch.no_grad():
+        for x_batch, y_batch in loader:
+            x_batch = x_batch.to(device)
+
+            output = model(x_batch).cpu().numpy()
+            target = y_batch.numpy()
+
+            preds.append(output)
+            actuals.append(target)
+
+    preds = np.vstack(preds)
+    actuals = np.vstack(actuals)
+
+    return preds, actuals
+
+#  Compute RMSE, MAE, and MAPE in Original Price Scale
+summary_rows = {}
+
+for ticker in STOCKS:
+    summary_rows[ticker] = {}
+
+    scaler = processed_data[ticker]["scaler"]
+    test_loader = loaders[ticker]["test_loader"]
+
+    for model_name in ["RNN", "LSTM", "GRU"]:
+        model = results[ticker][model_name]["model"]
+
+        preds_scaled, actuals_scaled = get_predictions(model, test_loader, DEVICE)
+
+        preds = scaler.inverse_transform(preds_scaled)
+        actuals = scaler.inverse_transform(actuals_scaled)
+
+        rmse = math.sqrt(mean_squared_error(actuals, preds))
+        mae = mean_absolute_error(actuals, preds)
+        mape = np.mean(np.abs((actuals - preds) / actuals)) * 100
+
+        summary_rows[ticker][model_name] = {
+            "RMSE": rmse,
+            "MAE": mae,
+            "MAPE": mape,
+            "preds": preds,
+            "actuals": actuals
+        }
+
+        print(f"{ticker} {model_name}: RMSE={rmse:.4f}, MAE={mae:.4f}, MAPE={mape:.2f}%")
+
+
+# ── Final Results Table ───────────────────────────────────────────────────
+table_rows = []
+
+for ticker in STOCKS:
+    for model_name in ["RNN", "LSTM", "GRU"]:
+        metrics = summary_rows[ticker][model_name]
+        avg_time = np.mean(results[ticker][model_name]["history"]["epoch_times"])
+
+        table_rows.append({
+            "Stock": ticker,
+            "Model": model_name,
+            "RMSE": metrics["RMSE"],
+            "MAE": metrics["MAE"],
+            "MAPE (%)": metrics["MAPE"],
+            "Avg Epoch Time (s)": avg_time
+        })
+
+summary_df = pd.DataFrame(table_rows)
+summary_df
+
+
+
+# ── Plot Training and Test Loss Curves ────────────────────────────────────
+for ticker in STOCKS:
+    plt.figure(figsize=(12, 5))
+
+    for model_name in ["RNN", "LSTM", "GRU"]:
+        h = results[ticker][model_name]["history"]
+        plt.plot(h["test_loss"], marker="o", label=f"{model_name} Test Loss")
+
+    plt.title(f"{ticker}: Validation/Test Loss Comparison")
+    plt.xlabel("Epoch")
+    plt.ylabel("MSE Loss")
+    plt.legend()
+    plt.grid(True)
+    plt.show()
+
+
+    # ── Plot Actual vs Predicted Prices ───────────────────────────────────────
+for ticker in STOCKS:
+    actual = summary_rows[ticker]["RNN"]["actuals"]
+
+    plt.figure(figsize=(14, 6))
+    plt.plot(actual, label="Actual", linewidth=2)
+
+    for model_name in ["RNN", "LSTM", "GRU"]:
+        preds = summary_rows[ticker][model_name]["preds"]
+        plt.plot(preds, label=f"{model_name} Predicted", alpha=0.8)
+
+    plt.title(f"{ticker}: Actual vs Predicted Closing Price")
+    plt.xlabel("Test Time Step")
+    plt.ylabel("Close Price")
+    plt.legend()
+    plt.grid(True)
+    plt.show()
+
+
+
+    # ── Bar Chart: RMSE Comparison ────────────────────────────────────────────
+for ticker in STOCKS:
+    model_names = ["RNN", "LSTM", "GRU"]
+    rmse_values = [summary_rows[ticker][m]["RMSE"] for m in model_names]
+
+    plt.figure(figsize=(7, 5))
+    plt.bar(model_names, rmse_values)
+    plt.title(f"{ticker}: RMSE Comparison")
+    plt.xlabel("Model")
+    plt.ylabel("RMSE")
+    plt.grid(axis="y")
+    plt.show()
+
+
+
+    # ── Find Best Model for Each Stock ────────────────────────────────────────
+for ticker in STOCKS:
+    best_model = min(
+        ["RNN", "LSTM", "GRU"],
+        key=lambda m: summary_rows[ticker][m]["RMSE"]
+    )
+
+    print(f"{ticker}: Best model based on RMSE = {best_model}")
+    print(f"RMSE: {summary_rows[ticker][best_model]['RMSE']:.4f}")
+    print(f"MAE : {summary_rows[ticker][best_model]['MAE']:.4f}")
+    print(f"MAPE: {summary_rows[ticker][best_model]['MAPE']:.2f}%")
+   
