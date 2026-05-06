@@ -9,6 +9,8 @@ from collections import Counter  # Count word frequencies for vocabulary
 
 import yfinance as yf
 
+from sklearn.preprocessing import MinMaxScaler
+from sklearn.metrics import mean_squared_error, mean_absolute_error
 
 import numpy as np           
 import torch                
@@ -28,8 +30,10 @@ print(f"NumPy version   : {np.__version__}")
 SEED = 42
 
 random.seed(SEED)           
-np.random.seed(SEED)       
+np.random.seed(SEED)    
+torch.manual_seed(SEED)   
 torch.cuda.manual_seed_all(SEED)
+
 print(f"All random seeds fixed to: {SEED}")
 
 def get_device():
@@ -112,3 +116,75 @@ plt.ylabel("Close Price")
 plt.legend()
 plt.grid(True)
 plt.show()
+
+# ── Scale Data and Create Train/Test Split ────────────────────────────────
+processed_data = {}
+
+for ticker, df in stock_data.items():
+    values = df[["Close"]].values.astype(np.float32)
+
+    train_size = int(len(values) * TRAIN_SPLIT)
+
+    train_values = values[:train_size]
+    test_values  = values[train_size - SEQ_LEN:]  # include previous SEQ_LEN days for test windows
+
+    scaler = MinMaxScaler(feature_range=(0, 1))
+    train_scaled = scaler.fit_transform(train_values)
+    test_scaled  = scaler.transform(test_values)
+
+    processed_data[ticker] = {
+        "df": df,
+        "scaler": scaler,
+        "train_scaled": train_scaled,
+        "test_scaled": test_scaled,
+        "train_size": train_size
+    }
+
+    print(f"{ticker}: train={len(train_scaled)}, test={len(test_scaled)}")
+
+
+#Sliding Window for Stock Prices
+
+class StockDataset(Dataset):
+    def __init__(self, data, seq_len):
+        self.data = torch.tensor(data, dtype=torch.float32)
+        self.seq_len = seq_len
+
+    def __len__(self):
+        return len(self.data) - self.seq_len
+
+    def __getitem__(self, idx):
+        x = self.data[idx : idx + self.seq_len]       # shape: (seq_len, 1)
+        y = self.data[idx + self.seq_len]             # shape: (1,)
+        return x, y
+
+
+# Create datasets and dataloaders for each stock
+loaders = {}
+
+for ticker, item in processed_data.items():
+    train_dataset = StockDataset(item["train_scaled"], SEQ_LEN)
+    test_dataset  = StockDataset(item["test_scaled"], SEQ_LEN)
+
+    train_loader = DataLoader(
+        train_dataset,
+        batch_size=BATCH_SIZE,
+        shuffle=True,
+        drop_last=True
+    )
+
+    test_loader = DataLoader(
+        test_dataset,
+        batch_size=BATCH_SIZE,
+        shuffle=False
+    )
+
+    loaders[ticker] = {
+        "train_loader": train_loader,
+        "test_loader": test_loader
+    }
+
+    print(f"{ticker}: train sequences={len(train_dataset)}, test sequences={len(test_dataset)}")
+    print("Dataset creation completed successfully")
+
+    #Shared Architecture for RNN / LSTM / GRU
