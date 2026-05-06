@@ -257,3 +257,93 @@ for model_name in ["RNN", "LSTM", "GRU"]:
     print(f"{model_name} parameters: {count_parameters(model):,}")
 
 
+ #Loss Function and Optimizer
+criterion = nn.MSELoss()
+
+def make_optimizer(model):
+    return optim.Adam(model.parameters(), lr=LEARNING_RATE)
+
+print("Loss function: MSELoss")
+print("Optimizer: Adam")
+
+# Training and Evaluation Functions 
+def train_epoch(model, loader, optimizer, criterion, device):
+    model.train()
+    total_loss = 0.0
+    n_batches = 0
+    start_time = time.time()
+
+    for x_batch, y_batch in loader:
+        x_batch = x_batch.to(device)
+        y_batch = y_batch.to(device)
+
+        optimizer.zero_grad()
+        preds = model(x_batch)
+
+        loss = criterion(preds, y_batch)
+        loss.backward()
+
+        torch.nn.utils.clip_grad_norm_(model.parameters(), CLIP_GRAD_NORM)
+
+        optimizer.step()
+
+        total_loss += loss.item()
+        n_batches += 1
+
+    avg_loss = total_loss / n_batches
+    epoch_time = time.time() - start_time
+
+    return avg_loss, epoch_time
+
+
+def evaluate_loss(model, loader, criterion, device):
+    model.eval()
+    total_loss = 0.0
+    n_batches = 0
+
+    with torch.no_grad():
+        for x_batch, y_batch in loader:
+            x_batch = x_batch.to(device)
+            y_batch = y_batch.to(device)
+
+            preds = model(x_batch)
+            loss = criterion(preds, y_batch)
+
+            total_loss += loss.item()
+            n_batches += 1
+
+    return total_loss / n_batches
+
+
+#Master Training Function
+    train_loader = loaders[ticker]["train_loader"]
+    test_loader  = loaders[ticker]["test_loader"]
+
+    model = create_model(model_name)
+    optimizer = make_optimizer(model)
+
+    history = {
+        "train_loss": [],
+        "test_loss": [],
+        "epoch_times": []
+    }
+
+    print(f"\nTraining {model_name} for {ticker}")
+    print("-" * 60)
+
+    for epoch in range(1, NUM_EPOCHS + 1):
+        train_loss, epoch_time = train_epoch(model, train_loader, optimizer, criterion, DEVICE)
+        test_loss = evaluate_loss(model, test_loader, criterion, DEVICE)
+
+        history["train_loss"].append(train_loss)
+        history["test_loss"].append(test_loss)
+        history["epoch_times"].append(epoch_time)
+
+        print(
+            f"Epoch {epoch:02d}/{NUM_EPOCHS} | "
+            f"Train Loss: {train_loss:.6f} | "
+            f"Test Loss: {test_loss:.6f} | "
+            f"Time: {epoch_time:.2f}s"
+        )
+
+    return model, history
