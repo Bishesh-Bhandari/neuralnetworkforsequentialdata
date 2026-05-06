@@ -12,7 +12,8 @@ import yfinance as yf
 from sklearn.preprocessing import MinMaxScaler
 from sklearn.metrics import mean_squared_error, mean_absolute_error
 
-import numpy as np           
+import numpy as np  
+import pandas as pd         
 import torch                
 import torch.nn as nn       
 import torch.optim as optim  
@@ -188,3 +189,71 @@ for ticker, item in processed_data.items():
     print("Dataset creation completed successfully")
 
     #Shared Architecture for RNN / LSTM / GRU
+   
+class RecurrentStockPredictor(nn.Module):
+    def __init__(self, input_size, hidden_size, num_layers, dropout, rnn_type):
+        super().__init__()
+
+        self.rnn_type = rnn_type.upper()
+
+        if self.rnn_type == "RNN":
+            self.rnn = nn.RNN(
+                input_size=input_size,
+                hidden_size=hidden_size,
+                num_layers=num_layers,
+                batch_first=True,
+                dropout=dropout if num_layers > 1 else 0
+            )
+        elif self.rnn_type == "LSTM":
+            self.rnn = nn.LSTM(
+                input_size=input_size,
+                hidden_size=hidden_size,
+                num_layers=num_layers,
+                batch_first=True,
+                dropout=dropout if num_layers > 1 else 0
+            )
+        elif self.rnn_type == "GRU":
+            self.rnn = nn.GRU(
+                input_size=input_size,
+                hidden_size=hidden_size,
+                num_layers=num_layers,
+                batch_first=True,
+                dropout=dropout if num_layers > 1 else 0
+            )
+        else:
+            raise ValueError("rnn_type must be 'RNN', 'LSTM', or 'GRU'")
+
+        self.dropout = nn.Dropout(dropout)
+        self.fc = nn.Linear(hidden_size, 1)
+
+    def forward(self, x):
+        # x shape: (batch_size, seq_len, input_size)
+        out, hidden = self.rnn(x)
+
+        # Use the output from the last time step
+        last_out = out[:, -1, :]
+
+        last_out = self.dropout(last_out)
+        prediction = self.fc(last_out)
+
+        return prediction
+    
+def create_model(rnn_type):
+    torch.manual_seed(SEED)
+    model = RecurrentStockPredictor(
+        input_size=INPUT_SIZE,
+        hidden_size=HIDDEN_SIZE,
+        num_layers=NUM_LAYERS,
+        dropout=DROPOUT,
+        rnn_type=rnn_type
+    ).to(DEVICE)
+    return model
+
+def count_parameters(model):
+    return sum(p.numel() for p in model.parameters() if p.requires_grad)
+
+for model_name in ["RNN", "LSTM", "GRU"]:
+    model = create_model(model_name)
+    print(f"{model_name} parameters: {count_parameters(model):,}")
+
+
